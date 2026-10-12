@@ -1,449 +1,367 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import altair as alt
 import io
-
-# Importaciones de ReportLab para exportación nativa a PDF
-from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
+import os
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# Configuración de página web
+# Configuración de la página
 st.set_page_config(
-    page_title="Panel HME Autoservicio",
+    page_title="Sistema de Gestión - HME Drive Thru",
     page_icon="🚗",
     layout="wide"
 )
 
-# Estilo CSS para ocultar menú nativo y comprimir encabezados/tablas
-estilo_oculto = """
+# Estilo visual adaptado
+st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    h1 { font-size: 1.6rem !important; padding-top: 0rem !important; }
-    h2 { font-size: 1.3rem !important; }
-    h3 { font-size: 1.1rem !important; }
-    .stHeader { padding-top: 0.5rem !important; }
-    [data-testid="stTable"] th, [data-testid="stDataEditor"] th {
-        font-size: 13px !important;
-        white-space: nowrap !important;
-    }
+        .stMetric {
+            background-color: rgba(128, 128, 128, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(128, 128, 128, 0.2);
+        }
     </style>
-"""
-st.markdown(estilo_oculto, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 EXCEL_FILE = "DRIVE TRHU BASE.xlsx"
 
-# -------------------------------------------------------------
-# BASE DE DATOS DE USUARIOS Y ROLES
-# Roles disponibles: 'admin', 'visor_exportador', 'solo_vista'
-# -------------------------------------------------------------
-USUARIOS = {
-    "admin": {"password": "123", "rol": "admin", "nombre": "Administrador"},
-    "reportes": {"password": "123", "rol": "visor_exportador", "nombre": "Usuario Exportación"},
-    "invitado": {"password": "123", "rol": "solo_vista", "nombre": "Usuario Solo Lectura"}
-}
+def cargar_datos(file_path):
+    if not os.path.exists(file_path):
+        st.error(f"No se encuentra el archivo {file_path}. Asegúrate de que esté en la carpeta del proyecto.")
+        return None, None, None, None
+        
+    xls = pd.ExcelFile(file_path)
+    df_hme = pd.read_excel(xls, 'Drive HME')
+    df_at_2025 = pd.read_excel(xls, 'Atenciones 2025')
+    df_at_2026 = pd.read_excel(xls, 'Atenciones 2026')
+    df_cotizaciones = pd.read_excel(xls, 'Cotizaciones')
+    
+    # Formatear fechas si existen en las hojas
+    for df in [df_at_2025, df_at_2026]:
+        if 'FECHA DE SOLICITUD' in df.columns:
+            df['FECHA DE SOLICITUD'] = pd.to_datetime(df['FECHA DE SOLICITUD'], errors='coerce').dt.strftime('%Y-%m-%d')
+            
+    return df_hme, df_at_2025, df_at_2026, df_cotizaciones
 
-# Control de Sesión / Login
-if "autenticado" not in st.session_state:
+# Inicializar estado de autenticación y datos
+if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
-    st.session_state.usuario_actual = None
-    st.session_state.rol_actual = None
-
-def login():
-    st.title("🔒 Control de Acceso - HME System")
-    with st.form("form_login"):
-        user = st.text_input("Usuario:").strip().lower()
-        pwd = st.text_input("Contraseña:", type="password")
-        submit = st.form_submit_button("Iniciar Sesión")
-
-        if submit:
-            if user in USUARIOS and USUARIOS[user]["password"] == pwd:
-                st.session_state.autenticado = True
-                st.session_state.usuario_actual = USUARIOS[user]["nombre"]
-                st.session_state.rol_actual = USUARIOS[user]["rol"]
-                st.rerun()
-            else:
-                st.error("⚠️ Usuario o contraseña incorrectos.")
-
-def logout():
-    st.session_state.autenticado = False
-    st.session_state.usuario_actual = None
-    st.session_state.rol_actual = None
-    st.rerun()
-
-if not st.session_state.autenticado:
-    login()
-    st.stop()
-
-# -------------------------------------------------------------
-# CARGA Y PERSISTENCIA DE DATOS
-# -------------------------------------------------------------
-@st.cache_data
-def cargar_datos_iniciales():
-    xls = pd.ExcelFile(EXCEL_FILE)
-    df_hme = pd.read_excel(xls, sheet_name="Drive HME")
-    df_2025 = pd.read_excel(xls, sheet_name="Atenciones 2025")
-    df_2026 = pd.read_excel(xls, sheet_name="Atenciones 2026")
-    df_cotiz = pd.read_excel(xls, sheet_name="Cotizaciones")
-    return df_hme, df_2025, df_2026, df_cotiz
 
 if 'df_hme' not in st.session_state:
-    df_hme_ini, df_2025_ini, df_2026_ini, df_cotiz_ini = cargar_datos_iniciales()
-    st.session_state.df_hme = df_hme_ini
-    st.session_state.df_2025 = df_2025_ini
-    st.session_state.df_2026 = df_2026_ini
-    st.session_state.df_cotiz = df_cotiz_ini
+    df_h, df_25, df_26, df_cot = cargar_datos(EXCEL_FILE)
+    st.session_state.df_hme = df_h
+    st.session_state.df_at_2025 = df_25
+    st.session_state.df_at_2026 = df_26
+    st.session_state.df_cotizaciones = df_cot
 
-RENOMBRAR_GLOBAL = {
-    'HEADPHONE OPERATIVOS': 'Headph. Operat.',
-    'HEADPHONE AVERIADOS': 'Headph. Averiados',
-    'TOTAL HEADPHONE': 'Total Headph.',
-    'CARGADOR DE BATERIAS': 'Cargador Bat.',
-    'CARGADOR OPERATIVO': 'Estado Cargador',
-    'UBICACIÓN': 'Ubicación',
-    'TIENDA': 'Tienda',
-    'TIPO DE ATENCION': 'Tipo Atenc.',
-    'COSTO DE ATENCION': 'Costo ($)',
-    'DIAGNOSTICO': 'Diagnóstico',
-    'SOLUCION': 'Solución',
-    'TECNICO': 'Técnico',
-    'FECHA': 'Fecha'
-}
+# --- PANTALLA DE LOGIN ---
+if not st.session_state.autenticado:
+    st.title("🔐 Acceso al Sistema - HME Drive Thru")
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("### Por favor, ingrese sus credenciales")
+        with st.form("form_login"):
+            usuario_ingresado = st.text_input("Usuario")
+            clave_ingresada = st.text_input("Contraseña", type="password")
+            btn_login = st.form_submit_button("Ingresar al Sistema", use_container_width=True)
+            
+            if btn_login:
+                USUARIO_VALIDO = "admin"
+                CLAVE_VALIDA = "hme2026"
+                
+                if usuario_ingresado == USUARIO_VALIDO and clave_ingresada == CLAVE_VALIDA:
+                    st.session_state.autenticado = True
+                    st.success("¡Acceso exitoso! Cargando sistema...")
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos. Intente nuevamente.")
+                    
+    st.stop()
 
-REVERSO_GLOBAL = {v: k for k, v in RENOMBRAR_GLOBAL.items()}
-
-def acortar_columnas(df):
-    columnas_existentes = {k: v for k, v in RENOMBRAR_GLOBAL.items() if k in df.columns}
-    return df.rename(columns=columnas_existentes)
-
-def guardar_hoja_excel(df, nombre_hoja):
-    try:
-        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-            df.to_excel(writer, sheet_name=nombre_hoja, index=False)
-        return True
-    except Exception:
-        return False
-
-# -------------------------------------------------------------
-# FUNCIONES AUXILIARES DE EXPORTACIÓN (EXCEL Y PDF REAL)
-# -------------------------------------------------------------
-def exportar_excel(df):
+# --- FUNCIONES DE EXPORTACIÓN (PDF / EXCEL) ---
+def convertir_df_a_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte')
     return output.getvalue()
 
-def generar_pdf(titulo, df):
-    """Genera un archivo PDF ajustando automáticamente el ancho de tabla y texto."""
-    df_corto = acortar_columnas(df)
+def generar_pdf_resumen(titulo, df):
     buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    elements = []
     
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(letter),
-        rightMargin=15,
-        leftMargin=15,
-        topMargin=15,
-        bottomMargin=15
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'TitleStyle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#1f77b4'), spaceAfter=15
     )
     
-    elementos = []
-    estilos = getSampleStyleSheet()
+    elements.append(Paragraph(f"<b>Reporte Ejecutivo: {titulo}</b>", title_style))
+    elements.append(Spacer(1, 10))
     
-    estilo_titulo = ParagraphStyle(
-        'TituloPDF',
-        parent=estilos['Heading1'],
-        fontSize=14,
-        leading=16,
-        textColor=colors.HexColor('#1E3A8A'),
-        alignment=1,
-        spaceAfter=6
-    )
-    
-    estilo_fecha = ParagraphStyle(
-        'FechaPDF',
-        parent=estilos['Normal'],
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor('#666666'),
-        alignment=2,
-        spaceAfter=10
-    )
-
-    elementos.append(Paragraph("🚗 Sistema HME Drive-Thru", estilo_titulo))
-    elementos.append(Paragraph(f"<b>{titulo}</b>", estilos['Heading2']))
-    elementos.append(Paragraph(f"Fecha de emisión: {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilo_fecha))
-    
-    estilo_celda = ParagraphStyle('Celda', parent=estilos['Normal'], fontSize=7, leading=9)
-    estilo_encabezado = ParagraphStyle('HeaderCelda', parent=estilos['Normal'], fontSize=7, leading=9, textColor=colors.white, fontName='Helvetica-Bold')
-    
-    datos_tabla = []
-    headers = [Paragraph(str(col), estilo_encabezado) for col in df_corto.columns]
-    datos_tabla.append(headers)
-    
-    for _, fila in df_corto.iterrows():
-        fila_texto = [Paragraph(str(val) if pd.notna(val) else "", estilo_celda) for val in fila]
-        datos_tabla.append(fila_texto)
-    
-    num_cols = len(df_corto.columns)
-    ancho_pagina_usable = 762
-    ancho_columna = ancho_pagina_usable / max(num_cols, 1)
-    
-    tabla = Table(datos_tabla, colWidths=[ancho_columna] * num_cols, repeatRows=1)
-    tabla.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E3A8A')),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 2),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')])
-    ]))
-    
-    elementos.append(tabla)
-    doc.build(elementos)
-    
+    if df.empty:
+        elements.append(Paragraph("No hay registros para los filtros seleccionados.", styles['Normal']))
+    else:
+        cols_a_mostrar = list(df.columns[:6])
+        data_tabla = [cols_a_mostrar]
+        for _, row in df.head(30).iterrows():
+            data_tabla.append([str(row[c])[:25] for c in cols_a_mostrar])
+            
+        t = Table(data_tabla, colWidths=[80, 80, 90, 90, 85, 85])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f77b4')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8f9fa')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d6d6d6')),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ]))
+        elements.append(t)
+        
+    doc.build(elements)
+    buffer.seek(0)
     return buffer.getvalue()
 
-# -------------------------------------------------------------
-# MENÚ DE NAVEGACIÓN Y PERFIL
-# -------------------------------------------------------------
-st.sidebar.title("🚗 HME Control")
-st.sidebar.caption(f"👤 **Usuario:** {st.session_state.usuario_actual}")
 
-opciones_menu = ["📊 Panel General", "📋 Inventario de Tiendas", "🛠️ Histórico Atenciones", "💵 Cotizaciones"]
-
-if st.session_state.rol_actual == "admin":
-    opciones_menu.insert(3, "📝 Nueva Atención")
-
-if st.session_state.rol_actual in ["admin", "visor_exportador"]:
-    opciones_menu.append("📥 Exportar Datos")
-
-opcion = st.sidebar.radio("Menú Principal:", opciones_menu)
-
-if st.sidebar.button("🚪 Cerrar Sesión"):
-    logout()
-
-# -------------------------------------------------------------
-# MÓDULO 1: PANEL GENERAL
-# -------------------------------------------------------------
-if opcion == "📊 Panel General":
-    st.title("📊 Panel General HME")
-    st.caption("Indicadores clave e inventario general")
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Tiendas", len(st.session_state.df_hme))
-    c2.metric("Auric. Operativos", int(st.session_state.df_hme['HEADPHONE OPERATIVOS'].sum()))
-    c3.metric("Auric. Averiados", int(st.session_state.df_hme['HEADPHONE AVERIADOS'].sum()))
+# --- APLICACIÓN PRINCIPAL (POST-LOGIN) ---
+if 'df_hme' in st.session_state:
+    st.title("📊 Sistema de Gestión y Control - HME Drive Thru")
     
-    costo_total = st.session_state.df_2026['COSTO DE ATENCION'].sum() if 'COSTO DE ATENCION' in st.session_state.df_2026.columns else 0
-    c4.metric("Gasto 2026", f"${costo_total:,.2f} USD")
-
-    st.markdown("---")
-    col_left, col_right = st.columns([1.2, 1])
+    st.sidebar.header("👤 Sesión de Usuario")
+    st.sidebar.success("Conectado como: **admin**")
     
-    with col_left:
-        st.subheader("📶 Estado de Auriculares")
-        st.bar_chart(st.session_state.df_hme.set_index('TIENDA')[['HEADPHONE OPERATIVOS', 'HEADPHONE AVERIADOS']])
+    # Botón para recargar datos directamente desde el archivo Excel modificado
+    if st.sidebar.button("🔄 Sincronizar / Recargar Excel", use_container_width=True):
+        df_h, df_25, df_26, df_cot = cargar_datos(EXCEL_FILE)
+        st.session_state.df_hme = df_h
+        st.session_state.df_at_2025 = df_25
+        st.session_state.df_at_2026 = df_26
+        st.session_state.df_cotizaciones = df_cot
+        st.success("¡Datos sincronizados correctamente desde el Excel!")
+        st.rerun()
 
-    with col_right:
-        st.subheader("⚠️ Equipos en Estado Crítico")
-        criticos = st.session_state.df_hme[
-            (st.session_state.df_hme['CARGADOR OPERATIVO'] != 'OPERATIVO') | 
-            (st.session_state.df_hme['HEADPHONE AVERIADOS'] > 0)
-        ][['TIENDA', 'UBICACIÓN', 'HEADPHONE AVERIADOS', 'CARGADOR OPERATIVO']]
-        st.dataframe(acortar_columnas(criticos), use_container_width=True, hide_index=True)
+    if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state.autenticado = False
+        st.rerun()
 
-# -------------------------------------------------------------
-# MÓDULO 2: INVENTARIO DE TIENDAS
-# -------------------------------------------------------------
-elif opcion == "📋 Inventario de Tiendas":
-    st.title("📋 Inventario de Tiendas")
+    st.sidebar.markdown("---")
+    st.sidebar.header("🔍 Panel de Navegación")
+    menu_opcion = st.sidebar.radio("Ir a la sección:", [
+        "🏢 Estado Drive HME", 
+        "🛠️ Atenciones 2025", 
+        "🛠️ Atenciones 2026", 
+        "💰 Cotizaciones",
+        "➕ Registrar Nuevo Caso (2026)"
+    ])
+    
+    st.sidebar.markdown("---")
+    st.sidebar.info("💡 Edita tu Excel en la PC y haz clic en 'Sincronizar' para ver los cambios al instante.")
 
-    if st.session_state.rol_actual == "admin":
-        st.info("💡 Edite los datos directamente en la tabla y presione 'Guardar Cambios':")
-        df_editado = st.data_editor(
-            acortar_columnas(st.session_state.df_hme), 
-            num_rows="dynamic", 
-            use_container_width=True,
-            key="editor_tiendas"
-        )
-        col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+    # Pestaña 1: Estado Drive HME
+    if menu_opcion == "🏢 Estado Drive HME":
+        c1, c2 = st.columns(2)
+        with c1:
+            marcas = ["Todas"] + list(st.session_state.df_hme["MARCA"].unique())
+            filtro_marca = st.selectbox("Filtrar por Marca:", marcas)
+        with c2:
+            busqueda_tienda = st.text_input("Buscar Tienda / Código / Ubicación:", "")
+
+        df_hme_filtered = st.session_state.df_hme.copy()
+        if filtro_marca != "Todas":
+            df_hme_filtered = df_hme_filtered[df_hme_filtered["MARCA"] == filtro_marca]
+        if busqueda_tienda:
+            df_hme_filtered = df_hme_filtered[
+                df_hme_filtered["TIENDA"].astype(str).str.contains(busqueda_tienda, case=False, na=False) |
+                df_hme_filtered["UBICACIÓN"].astype(str).str.contains(busqueda_tienda, case=False, na=False)
+            ]
+
+        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
+        with col_title:
+            st.subheader("🏢 Estado General de Equipos en Tiendas HME")
         with col_btn1:
-            if st.button("💾 Guardar Cambios"):
-                df_restaurado = df_editado.rename(columns=REVERSO_GLOBAL)
-                st.session_state.df_hme = df_restaurado
-                if guardar_hoja_excel(df_restaurado, "Drive HME"):
-                    st.success("✅ ¡Inventario actualizado en la app y en Excel!")
-                else:
-                    st.warning("⚠️ Guardado en memoria. Cierre el Excel físico si lo tiene abierto.")
+            st.download_button("📊 Excel", convertir_df_a_excel(df_hme_filtered), "Estado_Drive_HME_Filtrado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with col_btn2:
-            st.download_button(
-                "📊 Exportar Excel", 
-                exportar_excel(st.session_state.df_hme), 
-                f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            st.download_button("📄 PDF", generar_pdf_resumen("Estado Drive HME", df_hme_filtered), "Estado_Drive_HME_Filtrado.pdf", "application/pdf", use_container_width=True)
+        
+        st.markdown("---")
+        
+        total_tiendas = len(df_hme_filtered)
+        total_headphone_op = df_hme_filtered["HEADPHONE OPERATIVOS"].sum() if not df_hme_filtered.empty else 0
+        total_headphone_av = df_hme_filtered["HEADPHONE AVERIADOS"].sum() if not df_hme_filtered.empty else 0
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Tiendas Monitoreadas", total_tiendas)
+        col2.metric("Headphones Operativos", int(total_headphone_op))
+        col3.metric("Headphones Averiados", int(total_headphone_av))
+        
+        st.markdown("---")
+
+        if not df_hme_filtered.empty:
+            st.markdown("### 📊 Comparativa de Headphones por Tienda")
+            df_chart = df_hme_filtered[["TIENDA", "HEADPHONE OPERATIVOS", "HEADPHONE AVERIADOS"]].melt(
+                id_vars=["TIENDA"], value_vars=["HEADPHONE OPERATIVOS", "HEADPHONE AVERIADOS"],
+                var_name="Estado", value_name="Cantidad"
             )
-        with col_btn3:
-            st.download_button(
-                "📄 Exportar PDF", 
-                generar_pdf("Reporte Inventario", st.session_state.df_hme), 
-                f"Inventario_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                mime="application/pdf"
-            )
-    
-    elif st.session_state.rol_actual == "visor_exportador":
-        st.dataframe(acortar_columnas(st.session_state.df_hme), use_container_width=True, hide_index=True)
+            chart_hme = alt.Chart(df_chart).mark_bar().encode(
+                x=alt.X('TIENDA:N', sort=None),
+                y='Cantidad:Q',
+                color=alt.Color('Estado:N', scale=alt.Scale(range=['#2ca02c', '#d62728'])),
+                tooltip=['TIENDA', 'Estado', 'Cantidad']
+            ).properties(height=300)
+            st.altair_chart(chart_hme, use_container_width=True)
+
+        st.dataframe(df_hme_filtered, use_container_width=True)
+
+    # Pestaña 2: Atenciones 2025
+    elif menu_opcion == "🛠️ Atenciones 2025":
+        df_25_filtered = st.session_state.df_at_2025.copy()
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if "TIPOLOGIA" in df_25_filtered.columns:
+                tipologias_25 = ["Todas"] + list(df_25_filtered["TIPOLOGIA"].unique())
+                f_tipo_25 = st.selectbox("Filtrar por Tipología (2025):", tipologias_25)
+                if f_tipo_25 != "Todas":
+                    df_25_filtered = df_25_filtered[df_25_filtered["TIPOLOGIA"] == f_tipo_25]
+        with c2:
+            busqueda_25 = st.text_input("Buscar en Atenciones 2025:", "")
+            if busqueda_25:
+                df_25_filtered = df_25_filtered[df_25_filtered.astype(str).apply(lambda x: x.str.contains(busqueda_25, case=False)).any(axis=1)]
+
+        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
+        with col_title:
+            st.subheader("🛠️ Registro de Atenciones - 2025")
+        with col_btn1:
+            st.download_button("📊 Excel", convertir_df_a_excel(df_25_filtered), "Atenciones_2025_Filtrado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with col_btn2:
+            st.download_button("📄 PDF", generar_pdf_resumen("Atenciones 2025", df_25_filtered), "Atenciones_2025_Filtrado.pdf", "application/pdf", use_container_width=True)
+        
+        st.markdown("---")
+        st.metric("Total de Atenciones Filtradas (2025)", len(df_25_filtered))
+        st.markdown("---")
+        st.dataframe(df_25_filtered, use_container_width=True)
+
+    # Pestaña 3: Atenciones 2026
+    elif menu_opcion == "🛠️ Atenciones 2026":
+        df_26_filtered = st.session_state.df_at_2026.copy()
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if "TIPOLOGIA" in df_26_filtered.columns:
+                tips_26 = ["Todas"] + list(df_26_filtered["TIPOLOGIA"].unique())
+                ft_26 = st.selectbox("Filtrar por Tipología (2026):", tips_26)
+                if ft_26 != "Todas":
+                    df_26_filtered = df_26_filtered[df_26_filtered["TIPOLOGIA"] == ft_26]
+        with c2:
+            busqueda_26 = st.text_input("Buscar en Atenciones 2026:", "")
+            if busqueda_26:
+                df_26_filtered = df_26_filtered[df_26_filtered.astype(str).apply(lambda x: x.str.contains(busqueda_26, case=False)).any(axis=1)]
+
+        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
+        with col_title:
+            st.subheader("🛠️ Registro de Atenciones - 2026")
+        with col_btn1:
+            st.download_button("📊 Excel", convertir_df_a_excel(df_26_filtered), "Atenciones_2026_Filtrado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with col_btn2:
+            st.download_button("📄 PDF", generar_pdf_resumen("Atenciones 2026", df_26_filtered), "Atenciones_2026_Filtrado.pdf", "application/pdf", use_container_width=True)
+        
+        st.markdown("---")
+        
+        total_atenciones_26 = len(df_26_filtered)
+        total_costo_26 = df_26_filtered["COSTO DE ATENCION"].sum() if "COSTO DE ATENCION" in df_26_filtered.columns else 0
+        
         col1, col2 = st.columns(2)
-        with col1:
-            st.download_button(
-                "📊 Exportar Excel", 
-                exportar_excel(st.session_state.df_hme), 
-                f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        with col2:
-            st.download_button(
-                "📄 Exportar PDF", 
-                generar_pdf("Reporte Inventario", st.session_state.df_hme), 
-                f"Inventario_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                mime="application/pdf"
-            )
+        col1.metric("Atenciones Filtradas (2026)", total_atenciones_26)
+        col2.metric("Costo Total Acumulado", f"S/. {total_costo_26:,.2f}")
+        
+        st.markdown("---")
 
-    else:  # solo_vista
-        st.warning("🔒 Modo Lectura. No tiene permisos para editar ni descargar información.")
-        st.dataframe(acortar_columnas(st.session_state.df_hme), use_container_width=True, hide_index=True)
+        if "MES" in df_26_filtered.columns and not df_26_filtered.empty:
+            st.markdown("### 📈 Tendencia de Atenciones por Mes y Costos por Tipología")
+            c_g1, c_g2 = st.columns(2)
+            with c_g1:
+                conteo_mes = df_26_filtered["MES"].value_counts().reset_index()
+                conteo_mes.columns = ["Mes", "Cantidad"]
+                chart_mes = alt.Chart(conteo_mes).mark_bar(color="#1f77b4", cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
+                    x=alt.X('Mes', sort=None), y='Cantidad', tooltip=['Mes', 'Cantidad']
+                ).properties(height=250, title="Atenciones por Mes")
+                st.altair_chart(chart_mes, use_container_width=True)
+            with c_g2:
+                costo_tipo = df_26_filtered.groupby("TIPOLOGIA")["COSTO DE ATENCION"].sum().reset_index()
+                chart_tipo = alt.Chart(costo_tipo).mark_arc(innerRadius=50).encode(
+                    theta='COSTO DE ATENCION:Q', color='TIPOLOGIA:N', tooltip=['TIPOLOGIA', 'COSTO DE ATENCION']
+                ).properties(height=250, title="Costo por Tipología (S/.)")
+                st.altair_chart(chart_tipo, use_container_width=True)
 
-# -------------------------------------------------------------
-# MÓDULO 3: HISTÓRICO DE ATENCIONES
-# -------------------------------------------------------------
-elif opcion == "🛠️ Histórico Atenciones":
-    st.title("🛠️ Histórico de Atenciones")
-    t1, t2 = st.tabs(["Atenciones 2026", "Atenciones 2025"])
-    
-    with t1:
-        st.subheader("Año 2026")
-        st.dataframe(acortar_columnas(st.session_state.df_2026), use_container_width=True, hide_index=True)
-        if st.session_state.rol_actual in ["admin", "visor_exportador"]:
-            c1, c2 = st.columns(2)
+        st.dataframe(df_26_filtered, use_container_width=True)
+
+    # Pestaña 4: Cotizaciones
+    elif menu_opcion == "💰 Cotizaciones":
+        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
+        with col_title:
+            st.subheader("💰 Cotizaciones HME")
+        with col_btn1:
+            st.download_button("📊 Excel", convertir_df_a_excel(st.session_state.df_cotizaciones), "Cotizaciones_HME.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with col_btn2:
+            st.download_button("📄 PDF", generar_pdf_resumen("Cotizaciones HME", st.session_state.df_cotizaciones), "Cotizaciones_HME.pdf", "application/pdf", use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("Listado oficial de cotizaciones vigentes para componentes y sistemas completos.")
+        st.dataframe(st.session_state.df_cotizaciones, use_container_width=True)
+
+    # Pestaña 5: Registrar Nuevo Caso (2026)
+    elif menu_opcion == "➕ Registrar Nuevo Caso (2026)":
+        st.subheader("➕ Agregar Nueva Atención / Caso al Sistema (2026)")
+        st.markdown("Completa los campos para registrar un nuevo caso y actualizar automáticamente los reportes y costos.")
+        
+        with st.form("form_nuevo_caso"):
+            c1, c2, c3 = st.columns(3)
             with c1:
-                st.download_button(
-                    "📊 Descargar Excel (2026)", 
-                    exportar_excel(st.session_state.df_2026), 
-                    f"Atenciones_2026_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                marca_input = st.text_input("Marca", "DELOSI")
+                tienda_input = st.text_input("Tienda", "KFC ")
+                ubicacion_input = st.text_input("Ubicación", "SAN ISIDRO")
             with c2:
-                st.download_button(
-                    "📄 Descargar PDF (2026)", 
-                    generar_pdf("Atenciones 2026", st.session_state.df_2026), 
-                    f"Atenciones_2026_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                    mime="application/pdf"
-                )
-
-    with t2:
-        st.subheader("Año 2025")
-        st.dataframe(acortar_columnas(st.session_state.df_2025), use_container_width=True, hide_index=True)
-        if st.session_state.rol_actual in ["admin", "visor_exportador"]:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.download_button(
-                    "📊 Descargar Excel (2025)", 
-                    exportar_excel(st.session_state.df_2025), 
-                    f"Atenciones_2025_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            with c2:
-                st.download_button(
-                    "📄 Descargar PDF (2025)", 
-                    generar_pdf("Atenciones 2025", st.session_state.df_2025), 
-                    f"Atenciones_2025_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                    mime="application/pdf"
-                )
-
-# -------------------------------------------------------------
-# MÓDULO 4: REGISTRAR NUEVA ATENCIÓN (SOLO ADMIN)
-# -------------------------------------------------------------
-elif opcion == "📝 Nueva Atención" and st.session_state.rol_actual == "admin":
-    st.title("📝 Registrar Atención")
-    with st.form("formulario_atencion"):
-        col1, col2 = st.columns(2)
-        with col1:
-            tiendas_disponibles = st.session_state.df_hme['TIENDA'].unique()
-            tienda_seleccionada = st.selectbox("Tienda:", tiendas_disponibles)
-            fecha_atencion = st.date_input("Fecha:", datetime.now())
-            tipo_atencion = st.selectbox("Tipo:", ["Preventivo", "Correctivo", "Garantía", "Instalación"])
-            tecnico_responsable = st.text_input("Técnico:")
-
-        with col2:
-            diagnostico_tecnico = st.text_area("Diagnóstico / Problema:")
-            solucion_aplicada = st.text_area("Solución Realizada:")
-            costo_servicio = st.number_input("Costo ($ USD):", min_value=0.0, step=10.0)
-
-        boton_enviar = st.form_submit_button("💾 Guardar Atención")
-
-        if boton_enviar:
-            filtro_tienda = st.session_state.df_hme[st.session_state.df_hme['TIENDA'] == tienda_seleccionada]
-            ubicacion = filtro_tienda['UBICACIÓN'].values[0] if len(filtro_tienda) > 0 else ""
-
-            nuevo_ticket = pd.DataFrame([{
-                "FECHA": fecha_atencion.strftime("%Y-%m-%d"),
-                "TIENDA": tienda_seleccionada,
-                "UBICACIÓN": ubicacion,
-                "TIPO DE ATENCION": tipo_atencion,
-                "TECNICO": tecnico_responsable,
-                "DIAGNOSTICO": diagnostico_tecnico,
-                "SOLUCION": solucion_aplicada,
-                "COSTO DE ATENCION": costo_servicio
-            }])
-
-            st.session_state.df_2026 = pd.concat([st.session_state.df_2026, nuevo_ticket], ignore_index=True)
-            guardar_hoja_excel(st.session_state.df_2026, "Atenciones 2026")
-            st.success("✅ ¡Atención registrada y guardada!")
-
-# -------------------------------------------------------------
-# MÓDULO 5: CATÁLOGO Y COTIZACIONES
-# -------------------------------------------------------------
-elif opcion == "💵 Cotizaciones":
-    st.title("💵 Catálogo de Repuestos")
-    st.dataframe(acortar_columnas(st.session_state.df_cotiz), use_container_width=True, hide_index=True)
-
-# -------------------------------------------------------------
-# MÓDULO 6: EXPORTAR DATOS (ADMIN Y VISOR_EXPORTADOR)
-# -------------------------------------------------------------
-elif opcion == "📥 Exportar Datos" and st.session_state.rol_actual in ["admin", "visor_exportador"]:
-    st.title("📥 Centro de Exportación")
-    modulo_exportar = st.selectbox("Seleccionar Tabla:", ["Inventario de Tiendas", "Atenciones 2026", "Atenciones 2025", "Catálogo de Repuestos"])
-
-    if modulo_exportar == "Inventario de Tiendas":
-        df_target = st.session_state.df_hme
-    elif modulo_exportar == "Atenciones 2026":
-        df_target = st.session_state.df_2026
-    elif modulo_exportar == "Atenciones 2025":
-        df_target = st.session_state.df_2025
-    else:
-        df_target = st.session_state.df_cotiz
-
-    st.dataframe(acortar_columnas(df_target), use_container_width=True, hide_index=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.download_button(
-            "📊 Descargar Excel", 
-            exportar_excel(df_target), 
-            f"{modulo_exportar}.xlsx", 
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-    with col2:
-        st.download_button(
-            "📄 Descargar PDF", 
-            generar_pdf(modulo_exportar, df_target), 
-            f"{modulo_exportar}.pdf", 
-            mime="application/pdf", 
-            use_container_width=True
-        )
+                mes_input = st.selectbox("Mes", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
+                fecha_solicitud = st.date_input("Fecha de Solicitud")
+                solicitante_input = st.text_input("Solicitante", "EDGAR CUSIHUAMAN")
+            with c3:
+                tipologia_input = st.selectbox("Tipología", ["T1", "T2", "T3", "T4"])
+                horario_input = st.selectbox("Horario", ["HORARIO DE OFICINA", "NOCTURNO"])
+                costo_input = st.number_input("Costo de Atención (S/.)", min_value=0.0, value=50.0, step=5.0)
+            
+            solicitud_input = st.text_area("Descripción de la Solicitud", "REVISIÓN TÉCNICA DE EQUIPOS HME")
+            detalle_input = st.text_area("Detalle de la Atención", "SE REALIZÓ SOPORTE TÉCNICO Y VALIDACIÓN DE SISTEMA.")
+            
+            submit_button = st.form_submit_button(label="💾 Guardar Caso en la Base de Sesión")
+            
+            if submit_button:
+                nuevo_item = len(st.session_state.df_at_2026) + 1
+                fecha_formateada = pd.to_datetime(fecha_solicitud).strftime('%Y-%m-%d')
+                
+                nuevo_registro = {
+                    "ITEM": nuevo_item,
+                    "MARCA": marca_input,
+                    "TIENDA": tienda_input,
+                    "UBICACIÓN ": ubicacion_input,
+                    "MES": mes_input,
+                    "FECHA DE SOLICITUD": fecha_formateada,
+                    "SOLICITANTE": solicitante_input,
+                    "SOLICITUD": solicitud_input,
+                    "DETALLE": detalle_input,
+                    "TIPOLOGIA": tipologia_input,
+                    "DIURNO/NOCTURNO": horario_input,
+                    "COSTO DE ATENCION": costo_input
+                }
+                
+                nuevo_df = pd.DataFrame([nuevo_registro])
+                st.session_state.df_at_2026 = pd.concat([st.session_state.df_at_2026, nuevo_df], ignore_index=True)
+                st.success("¡Caso registrado correctamente! Ya se refleja en las estadísticas, gráficos y opciones de exportación.")
