@@ -1,0 +1,4 @@
+git rebase --abort
+git add .
+git commit -m "Forzar version actual con Excel actualizado"
+git push origin main --force
