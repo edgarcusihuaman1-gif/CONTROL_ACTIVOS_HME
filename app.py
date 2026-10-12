@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
-import os  # Necesario para verificar la fecha de modificación del archivo
 
 # Importaciones de ReportLab para exportación nativa a PDF
 from reportlab.lib.pagesizes import letter, landscape
@@ -34,11 +33,11 @@ estilo_oculto = """
 """
 st.markdown(estilo_oculto, unsafe_allow_html=True)
 
-# ---> RUTA COMPLETA DE TU ARCHIVO EN EL ESCRITORIO <---
-EXCEL_FILE = r"C:\Users\prov231.FRANQUICIASPERU\Desktop\Sistema_HME_DriveThru\DRIVE TRHU BASE.xlsx"
+EXCEL_FILE = "DRIVE TRHU BASE.xlsx"
 
 # -------------------------------------------------------------
 # BASE DE DATOS DE USUARIOS Y ROLES
+# Roles disponibles: 'admin', 'visor_exportador', 'solo_vista'
 # -------------------------------------------------------------
 USUARIOS = {
     "admin": {"password": "123", "rol": "admin", "nombre": "Administrador"},
@@ -79,31 +78,23 @@ if not st.session_state.autenticado:
     st.stop()
 
 # -------------------------------------------------------------
-# CARGA Y PERSISTENCIA DE DATOS CON DETECCIÓN DE CAMBIOS
+# CARGA Y PERSISTENCIA DE DATOS
 # -------------------------------------------------------------
-def obtener_tiempo_modificacion():
-    """Obtiene la marca de tiempo del archivo físico en el escritorio."""
-    if os.path.exists(EXCEL_FILE):
-        return os.path.getmtime(EXCEL_FILE)
-    return 0
+@st.cache_data
+def cargar_datos_iniciales():
+    xls = pd.ExcelFile(EXCEL_FILE)
+    df_hme = pd.read_excel(xls, sheet_name="Drive HME")
+    df_2025 = pd.read_excel(xls, sheet_name="Atenciones 2025")
+    df_2026 = pd.read_excel(xls, sheet_name="Atenciones 2026")
+    df_cotiz = pd.read_excel(xls, sheet_name="Cotizaciones")
+    return df_hme, df_2025, df_2026, df_cotiz
 
-def cargar_datos_si_cambio():
-    """Comprueba si el Excel cambió en el escritorio para recargarlo automáticamente."""
-    mod_time = obtener_tiempo_modificacion()
-    
-    if ('ultimo_cambio_excel' not in st.session_state) or (st.session_state.ultimo_cambio_excel != mod_time):
-        try:
-            xls = pd.ExcelFile(EXCEL_FILE)
-            st.session_state.df_hme = pd.read_excel(xls, sheet_name="Drive HME")
-            st.session_state.df_2025 = pd.read_excel(xls, sheet_name="Atenciones 2025")
-            st.session_state.df_2026 = pd.read_excel(xls, sheet_name="Atenciones 2026")
-            st.session_state.df_cotiz = pd.read_excel(xls, sheet_name="Cotizaciones")
-            st.session_state.ultimo_cambio_excel = mod_time
-        except Exception as e:
-            st.error(f"⚠️ No se pudo leer el archivo Excel en la ruta especificada. Error: {e}")
-
-# Ejecutar la verificación inicial
-cargar_datos_si_cambio()
+if 'df_hme' not in st.session_state:
+    df_hme_ini, df_2025_ini, df_2026_ini, df_cotiz_ini = cargar_datos_iniciales()
+    st.session_state.df_hme = df_hme_ini
+    st.session_state.df_2025 = df_2025_ini
+    st.session_state.df_2026 = df_2026_ini
+    st.session_state.df_cotiz = df_cotiz_ini
 
 RENOMBRAR_GLOBAL = {
     'HEADPHONE OPERATIVOS': 'Headph. Operat.',
@@ -131,7 +122,6 @@ def guardar_hoja_excel(df, nombre_hoja):
     try:
         with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
             df.to_excel(writer, sheet_name=nombre_hoja, index=False)
-        st.session_state.ultimo_cambio_excel = obtener_tiempo_modificacion()
         return True
     except Exception:
         return False
@@ -146,6 +136,7 @@ def exportar_excel(df):
     return output.getvalue()
 
 def generar_pdf(titulo, df):
+    """Genera un archivo PDF ajustando automáticamente el ancho de tabla y texto."""
     df_corto = acortar_columnas(df)
     buffer = io.BytesIO()
     
@@ -234,15 +225,6 @@ if st.session_state.rol_actual in ["admin", "visor_exportador"]:
 
 opcion = st.sidebar.radio("Menú Principal:", opciones_menu)
 
-st.sidebar.markdown("---")
-
-# Botón para sincronizar manualmente el archivo de Excel ubicado en el escritorio
-if st.sidebar.button("🔄 Sincronizar con Excel"):
-    st.session_state.ultimo_cambio_excel = 0
-    cargar_datos_si_cambio()
-    st.sidebar.success("¡Datos sincronizados con éxito!")
-    st.rerun()
-
 if st.sidebar.button("🚪 Cerrar Sesión"):
     logout()
 
@@ -296,9 +278,9 @@ elif opcion == "📋 Inventario de Tiendas":
                 df_restaurado = df_editado.rename(columns=REVERSO_GLOBAL)
                 st.session_state.df_hme = df_restaurado
                 if guardar_hoja_excel(df_restaurado, "Drive HME"):
-                    st.success("✅ ¡Inventario actualizado en el archivo de Excel del escritorio!")
+                    st.success("✅ ¡Inventario actualizado en la app y en Excel!")
                 else:
-                    st.warning("⚠️ Asegúrate de cerrar el archivo Excel en tu computadora si está abierto.")
+                    st.warning("⚠️ Guardado en memoria. Cierre el Excel físico si lo tiene abierto.")
         with col_btn2:
             st.download_button(
                 "📊 Exportar Excel", 
@@ -421,7 +403,7 @@ elif opcion == "📝 Nueva Atención" and st.session_state.rol_actual == "admin"
 
             st.session_state.df_2026 = pd.concat([st.session_state.df_2026, nuevo_ticket], ignore_index=True)
             guardar_hoja_excel(st.session_state.df_2026, "Atenciones 2026")
-            st.success("✅ ¡Atención registrada y guardada en tu Excel del escritorio!")
+            st.success("✅ ¡Atención registrada y guardada!")
 
 # -------------------------------------------------------------
 # MÓDULO 5: CATÁLOGO Y COTIZACIONES
@@ -431,7 +413,7 @@ elif opcion == "💵 Cotizaciones":
     st.dataframe(acortar_columnas(st.session_state.df_cotiz), use_container_width=True, hide_index=True)
 
 # -------------------------------------------------------------
-# MÓDULO 6: EXPORTAR DATOS
+# MÓDULO 6: EXPORTAR DATOS (ADMIN Y VISOR_EXPORTADOR)
 # -------------------------------------------------------------
 elif opcion == "📥 Exportar Datos" and st.session_state.rol_actual in ["admin", "visor_exportador"]:
     st.title("📥 Centro de Exportación")
