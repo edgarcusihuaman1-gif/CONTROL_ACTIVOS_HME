@@ -1,0 +1,12 @@
+{
+    "admin": {
+        "clave": "hme2026",
+        "rol": "Administrador",
+        "nombre": "Edgar (Admin)"
+    },
+    "equipo": {
+        "clave": "hme2025",
+        "rol": "Visualizador",
+        "nombre": "Colaborador HME"
+    }
+}

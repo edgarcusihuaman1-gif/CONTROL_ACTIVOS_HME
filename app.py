@@ -3,6 +3,7 @@ import pandas as pd
 import altair as alt
 import io
 import os
+import json
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -28,6 +29,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 EXCEL_FILE = "DRIVE TRHU BASE.xlsx"
+USERS_FILE = "usuarios.json"
+
+# --- GESTIÓN DE USUARIOS (JSON) ---
+def cargar_usuarios():
+    # Si no existe el archivo JSON, se crea con los usuarios por defecto
+    if not os.path.exists(USERS_FILE):
+        usuarios_default = {
+            "admin": {"clave": "hme2026", "rol": "Administrador", "nombre": "Edgar (Admin)"},
+            "equipo": {"clave": "hme2025", "rol": "Visualizador", "nombre": "Colaborador HME"}
+        }
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(usuarios_default, f, indent=4, ensure_ascii=False)
+        return usuarios_default
+    else:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+def guardar_usuarios(dict_usuarios):
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(dict_usuarios, f, indent=4, ensure_ascii=False)
+
+# Cargar base de usuarios activa
+usuarios_db = cargar_usuarios()
 
 def cargar_datos(file_path):
     if not os.path.exists(file_path):
@@ -40,16 +64,18 @@ def cargar_datos(file_path):
     df_at_2026 = pd.read_excel(xls, 'Atenciones 2026')
     df_cotizaciones = pd.read_excel(xls, 'Cotizaciones')
     
-    # Formatear fechas si existen en las hojas
+    # Formatear fechas
     for df in [df_at_2025, df_at_2026]:
         if 'FECHA DE SOLICITUD' in df.columns:
             df['FECHA DE SOLICITUD'] = pd.to_datetime(df['FECHA DE SOLICITUD'], errors='coerce').dt.strftime('%Y-%m-%d')
             
     return df_hme, df_at_2025, df_at_2026, df_cotizaciones
 
-# Inicializar estado de autenticación y datos
+# Inicializar estados de sesión
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
+    st.session_state.rol = None
+    st.session_state.usuario_actual = ""
 
 if 'df_hme' not in st.session_state:
     df_h, df_25, df_26, df_cot = cargar_datos(EXCEL_FILE)
@@ -58,29 +84,38 @@ if 'df_hme' not in st.session_state:
     st.session_state.df_at_2026 = df_26
     st.session_state.df_cotizaciones = df_cot
 
-# --- PANTALLA DE LOGIN ---
+# --- PANTALLA DE LOGIN DINÁMICO ---
 if not st.session_state.autenticado:
     st.title("🔐 Acceso al Sistema - HME Drive Thru")
     st.markdown("---")
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("### Por favor, ingrese sus credenciales")
+        st.markdown("### Por favor, ingresa tus credenciales")
+        
         with st.form("form_login"):
             usuario_ingresado = st.text_input("Usuario")
             clave_ingresada = st.text_input("Contraseña", type="password")
             btn_login = st.form_submit_button("Ingresar al Sistema", use_container_width=True)
             
             if btn_login:
-                USUARIO_VALIDO = "admin"
-                CLAVE_VALIDA = "hme2026"
+                usr = usuario_ingresado.strip().lower()
+                pwd = clave_ingresada.strip()
                 
-                if usuario_ingresado == USUARIO_VALIDO and clave_ingresada == CLAVE_VALIDA:
+                # Validación contra la base dinámicas de usuarios (usuarios.json)
+                if usr in usuarios_db and usuarios_db[usr]["clave"] == pwd:
                     st.session_state.autenticado = True
-                    st.success("¡Acceso exitoso! Cargando sistema...")
+                    st.session_state.rol = usuarios_db[usr]["rol"]
+                    st.session_state.usuario_actual = usuarios_db[usr]["nombre"]
+                    st.success(f"¡Bienvenido {st.session_state.usuario_actual}! Cargando portal...")
                     st.rerun()
                 else:
-                    st.error("Usuario o contraseña incorrectos. Intente nuevamente.")
+                    st.error("Usuario o contraseña incorrectos. Intento nuevamente.")
+                    
+        st.markdown("---")
+        st.info("💡 **Acceso de Prueba por Defecto:**\n\n"
+                "🔹 **Admin:** `admin` / `hme2026`\n\n"
+                "🔹 **Equipo:** `equipo` / `hme2025`")
                     
     st.stop()
 
@@ -132,41 +167,56 @@ def generar_pdf_resumen(titulo, df):
     return buffer.getvalue()
 
 
-# --- APLICACIÓN PRINCIPAL (POST-LOGIN) ---
+# --- APLICACIÓN PRINCIPAL ---
 if 'df_hme' in st.session_state:
     st.title("📊 Sistema de Gestión y Control - HME Drive Thru")
     
-    st.sidebar.header("👤 Sesión de Usuario")
-    st.sidebar.success("Conectado como: **admin**")
+    # Barra lateral de información del usuario
+    st.sidebar.header("👤 Sesión Activa")
+    st.sidebar.markdown(f"**Usuario:** {st.session_state.usuario_actual}")
+    st.sidebar.markdown(f"**Perfil:** `{st.session_state.rol}`")
     
-    # Botón para recargar datos directamente desde el archivo Excel modificado
-    if st.sidebar.button("🔄 Sincronizar / Recargar Excel", use_container_width=True):
-        df_h, df_25, df_26, df_cot = cargar_datos(EXCEL_FILE)
-        st.session_state.df_hme = df_h
-        st.session_state.df_at_2025 = df_25
-        st.session_state.df_at_2026 = df_26
-        st.session_state.df_cotizaciones = df_cot
-        st.success("¡Datos sincronizados correctamente desde el Excel!")
-        st.rerun()
+    # Opciones exclusivas del Administrador
+    if st.session_state.rol == "Administrador":
+        if st.sidebar.button("🔄 Sincronizar / Recargar Excel", use_container_width=True):
+            df_h, df_25, df_26, df_cot = cargar_datos(EXCEL_FILE)
+            st.session_state.df_hme = df_h
+            st.session_state.df_at_2025 = df_25
+            st.session_state.df_at_2026 = df_26
+            st.session_state.df_cotizaciones = df_cot
+            st.success("¡Datos sincronizados correctamente desde el Excel!")
+            st.rerun()
 
     if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.autenticado = False
+        st.session_state.rol = None
         st.rerun()
 
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Panel de Navegación")
-    menu_opcion = st.sidebar.radio("Ir a la sección:", [
-        "🏢 Estado Drive HME", 
-        "🛠️ Atenciones 2025", 
-        "🛠️ Atenciones 2026", 
-        "💰 Cotizaciones",
-        "➕ Registrar Nuevo Caso (2026)"
-    ])
     
-    st.sidebar.markdown("---")
-    st.sidebar.info("💡 Edita tu Excel en la PC y haz clic en 'Sincronizar' para ver los cambios al instante.")
+    # Menú dinámico según el rol
+    if st.session_state.rol == "Administrador":
+        menu_opcion = st.sidebar.radio("Ir a la sección:", [
+            "🏢 Estado Drive HME", 
+            "🛠️ Atenciones 2025", 
+            "🛠️ Atenciones 2026", 
+            "💰 Cotizaciones",
+            "➕ Registrar Nuevo Caso (2026)",
+            "👤 Gestión de Usuarios (Admin)"
+        ])
+    else:
+        menu_opcion = st.sidebar.radio("Ir a la sección:", [
+            "🏢 Estado Drive HME", 
+            "🛠️ Atenciones 2025", 
+            "🛠️ Atenciones 2026", 
+            "💰 Cotizaciones"
+        ])
+        st.sidebar.info("ℹ️ Perfil de lectura: Para solicitar modificaciones o registrar casos, comunícate con el administrador.")
 
-    # Pestaña 1: Estado Drive HME
+    st.sidebar.markdown("---")
+
+    # 1. Estado Drive HME
     if menu_opcion == "🏢 Estado Drive HME":
         c1, c2 = st.columns(2)
         with c1:
@@ -221,7 +271,7 @@ if 'df_hme' in st.session_state:
 
         st.dataframe(df_hme_filtered, use_container_width=True)
 
-    # Pestaña 2: Atenciones 2025
+    # 2. Atenciones 2025
     elif menu_opcion == "🛠️ Atenciones 2025":
         df_25_filtered = st.session_state.df_at_2025.copy()
         
@@ -250,7 +300,7 @@ if 'df_hme' in st.session_state:
         st.markdown("---")
         st.dataframe(df_25_filtered, use_container_width=True)
 
-    # Pestaña 3: Atenciones 2026
+    # 3. Atenciones 2026
     elif menu_opcion == "🛠️ Atenciones 2026":
         df_26_filtered = st.session_state.df_at_2026.copy()
         
@@ -304,7 +354,7 @@ if 'df_hme' in st.session_state:
 
         st.dataframe(df_26_filtered, use_container_width=True)
 
-    # Pestaña 4: Cotizaciones
+    # 4. Cotizaciones
     elif menu_opcion == "💰 Cotizaciones":
         col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
         with col_title:
@@ -318,8 +368,8 @@ if 'df_hme' in st.session_state:
         st.markdown("Listado oficial de cotizaciones vigentes para componentes y sistemas completos.")
         st.dataframe(st.session_state.df_cotizaciones, use_container_width=True)
 
-    # Pestaña 5: Registrar Nuevo Caso (2026)
-    elif menu_opcion == "➕ Registrar Nuevo Caso (2026)":
+    # 5. Registrar Nuevo Caso (Solo Administrador)
+    elif menu_opcion == "➕ Registrar Nuevo Caso (2026)" and st.session_state.rol == "Administrador":
         st.subheader("➕ Agregar Nueva Atención / Caso al Sistema (2026)")
         st.markdown("Completa los campos para registrar un nuevo caso y actualizar automáticamente los reportes y costos.")
         
@@ -330,16 +380,16 @@ if 'df_hme' in st.session_state:
                 tienda_input = st.text_input("Tienda", "KFC ")
                 ubicacion_input = st.text_input("Ubicación", "SAN ISIDRO")
             with c2:
-                mes_input = st.selectbox("Mes", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
-                fecha_solicitud = st.date_input("Fecha de Solicitud")
-                solicitante_input = st.text_input("Solicitante", "EDGAR CUSIHUAMAN")
+                mes_input = st.selectbox("MES", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
+                fecha_solicitud = st.date_input("FECHA DE SOLICITUD")
+                solicitante_input = st.text_input("SOLICITANTE", "EDGAR CUSIHUAMAN")
             with c3:
-                tipologia_input = st.selectbox("Tipología", ["T1", "T2", "T3", "T4"])
-                horario_input = st.selectbox("Horario", ["HORARIO DE OFICINA", "NOCTURNO"])
-                costo_input = st.number_input("Costo de Atención (S/.)", min_value=0.0, value=50.0, step=5.0)
+                tipologia_input = st.selectbox("TIPOLOGIA", ["T1", "T2", "T3", "T4"])
+                horario_input = st.selectbox("DIURNO/NOCTURNO", ["HORARIO DE OFICINA", "NOCTURNO"])
+                costo_input = st.number_input("COSTO DE ATENCION", min_value=0.0, value=50.0, step=5.0)
             
-            solicitud_input = st.text_area("Descripción de la Solicitud", "REVISIÓN TÉCNICA DE EQUIPOS HME")
-            detalle_input = st.text_area("Detalle de la Atención", "SE REALIZÓ SOPORTE TÉCNICO Y VALIDACIÓN DE SISTEMA.")
+            solicitud_input = st.text_area("SOLICITUD", "REVISIÓN TÉCNICA DE EQUIPOS HME")
+            detalle_input = st.text_area("DETALLE", "SE REALIZÓ SOPORTE TÉCNICO Y VALIDACIÓN DE SISTEMA.")
             
             submit_button = st.form_submit_button(label="💾 Guardar Caso en la Base de Sesión")
             
@@ -364,4 +414,61 @@ if 'df_hme' in st.session_state:
                 
                 nuevo_df = pd.DataFrame([nuevo_registro])
                 st.session_state.df_at_2026 = pd.concat([st.session_state.df_at_2026, nuevo_df], ignore_index=True)
-                st.success("¡Caso registrado correctamente! Ya se refleja en las estadísticas, gráficos y opciones de exportación.")
+                st.success("¡Caso registrado correctamente!")
+
+    # 6. GESTIÓN DE USUARIOS (NUEVA PESTAÑA ADMINISTRADOR)
+    elif menu_opcion == "👤 Gestión de Usuarios (Admin)" and st.session_state.rol == "Administrador":
+        st.subheader("👤 Administración y Registro de Usuarios")
+        st.markdown("Crea nuevos accesos para tus compañeros o actualiza contraseñas de manera sencilla.")
+        st.markdown("---")
+
+        col_crear, col_lista = st.columns([1, 1])
+
+        with col_crear:
+            st.markdown("### ➕ Crear / Actualizar Usuario")
+            with st.form("form_crear_usuario"):
+                nuevo_usr = st.text_input("Nombre de Usuario (Login)").strip().lower()
+                nueva_clave = st.text_input("Contraseña", type="password").strip()
+                nombre_completo = st.text_input("Nombre / Referencia (Ej: Juan Perez)").strip()
+                rol_seleccionado = st.selectbox("Perfil / Rol", ["Visualizador", "Administrador"])
+                
+                btn_crear_usr = st.form_submit_button("💾 Guardar Usuario", use_container_width=True)
+
+                if btn_crear_usr:
+                    if not nuevo_usr or not nueva_clave or not nombre_completo:
+                        st.error("Por favor completa todos los campos del formulario.")
+                    else:
+                        usuarios_db[nuevo_usr] = {
+                            "clave": nueva_clave,
+                            "rol": rol_seleccionado,
+                            "nombre": nombre_completo
+                        }
+                        guardar_usuarios(usuarios_db)
+                        st.success(f"¡Usuario '{nuevo_usr}' guardado con éxito con perfil '{rol_seleccionado}'!")
+                        st.rerun()
+
+        with col_lista:
+            st.markdown("### 📋 Usuarios Registrados")
+            lista_usrs = []
+            for u, data in usuarios_db.items():
+                lista_usrs.append({
+                    "Usuario": u,
+                    "Nombre": data.get("nombre", "-"),
+                    "Rol": data.get("rol", "-"),
+                    "Contraseña": "••••••••"
+                })
+            df_usuarios_ver = pd.DataFrame(lista_usrs)
+            st.dataframe(df_usuarios_ver, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown("### 🗑️ Eliminar Usuario")
+            usuarios_borrables = [u for u in usuarios_db.keys() if u != "admin"]
+            if usuarios_borrables:
+                usr_a_borrar = st.selectbox("Seleccionar usuario a eliminar:", usuarios_borrables)
+                if st.button("❌ Eliminar Acceso", use_container_width=True):
+                    del usuarios_db[usr_a_borrar]
+                    guardar_usuarios(usuarios_db)
+                    st.success(f"¡Usuario '{usr_a_borrar}' eliminado correctamente!")
+                    st.rerun()
+            else:
+                st.info("No hay usuarios secundarios creados para eliminar.")
