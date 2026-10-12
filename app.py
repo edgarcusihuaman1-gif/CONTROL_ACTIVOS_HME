@@ -33,7 +33,6 @@ USERS_FILE = "usuarios.json"
 
 # --- GESTIÓN DE USUARIOS (JSON) ---
 def cargar_usuarios():
-    # Si no existe el archivo JSON, se crea con los usuarios por defecto
     if not os.path.exists(USERS_FILE):
         usuarios_default = {
             "admin": {"clave": "hme2026", "rol": "Administrador", "nombre": "Edgar (Admin)"},
@@ -50,7 +49,6 @@ def guardar_usuarios(dict_usuarios):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(dict_usuarios, f, indent=4, ensure_ascii=False)
 
-# Cargar base de usuarios activa
 usuarios_db = cargar_usuarios()
 
 def cargar_datos(file_path):
@@ -64,14 +62,12 @@ def cargar_datos(file_path):
     df_at_2026 = pd.read_excel(xls, 'Atenciones 2026')
     df_cotizaciones = pd.read_excel(xls, 'Cotizaciones')
     
-    # Formatear fechas
     for df in [df_at_2025, df_at_2026]:
         if 'FECHA DE SOLICITUD' in df.columns:
             df['FECHA DE SOLICITUD'] = pd.to_datetime(df['FECHA DE SOLICITUD'], errors='coerce').dt.strftime('%Y-%m-%d')
             
     return df_hme, df_at_2025, df_at_2026, df_cotizaciones
 
-# Inicializar estados de sesión
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.rol = None
@@ -84,7 +80,7 @@ if 'df_hme' not in st.session_state:
     st.session_state.df_at_2026 = df_26
     st.session_state.df_cotizaciones = df_cot
 
-# --- PANTALLA DE LOGIN DINÁMICO ---
+# --- LOGIN ---
 if not st.session_state.autenticado:
     st.title("🔐 Acceso al Sistema - HME Drive Thru")
     st.markdown("---")
@@ -102,24 +98,19 @@ if not st.session_state.autenticado:
                 usr = usuario_ingresado.strip().lower()
                 pwd = clave_ingresada.strip()
                 
-                # Validación contra la base dinámicas de usuarios (usuarios.json)
                 if usr in usuarios_db and usuarios_db[usr]["clave"] == pwd:
                     st.session_state.autenticado = True
                     st.session_state.rol = usuarios_db[usr]["rol"]
                     st.session_state.usuario_actual = usuarios_db[usr]["nombre"]
-                    st.success(f"¡Bienvenido {st.session_state.usuario_actual}! Cargando portal...")
+                    st.success(f"¡Bienvenido {st.session_state.usuario_actual}!")
                     st.rerun()
                 else:
-                    st.error("Usuario o contraseña incorrectos. Intento nuevamente.")
+                    st.error("Usuario o contraseña incorrectos.")
                     
         st.markdown("---")
-        st.info("💡 **Acceso de Prueba por Defecto:**\n\n"
-                "🔹 **Admin:** `admin` / `hme2026`\n\n"
-                "🔹 **Equipo:** `equipo` / `hme2025`")
-                    
+        st.info("💡 **Admin:** `admin` / `hme2026`\n\n🔹 **Equipo:** `equipo` / `hme2025`")
     st.stop()
 
-# --- FUNCIONES DE EXPORTACIÓN (PDF / EXCEL) ---
 def convertir_df_a_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -130,35 +121,26 @@ def generar_pdf_resumen(titulo, df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
-    
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'TitleStyle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#1f77b4'), spaceAfter=15
-    )
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#1f77b4'), spaceAfter=15)
     
-    elements.append(Paragraph(f"<b>Reporte Ejecutivo: {titulo}</b>", title_style))
+    elements.append(Paragraph(f"<b>Reporte: {titulo}</b>", title_style))
     elements.append(Spacer(1, 10))
     
     if df.empty:
-        elements.append(Paragraph("No hay registros para los filtros seleccionados.", styles['Normal']))
+        elements.append(Paragraph("Sin registros.", styles['Normal']))
     else:
-        cols_a_mostrar = list(df.columns[:6])
-        data_tabla = [cols_a_mostrar]
+        cols = list(df.columns[:6])
+        data_t = [cols]
         for _, row in df.head(30).iterrows():
-            data_tabla.append([str(row[c])[:25] for c in cols_a_mostrar])
-            
-        t = Table(data_tabla, colWidths=[80, 80, 90, 90, 85, 85])
+            data_t.append([str(row[c])[:25] for c in cols])
+        t = Table(data_t, colWidths=[80, 80, 90, 90, 85, 85])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f77b4')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 9),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8f9fa')),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d6d6d6')),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
         elements.append(t)
         
@@ -166,17 +148,14 @@ def generar_pdf_resumen(titulo, df):
     buffer.seek(0)
     return buffer.getvalue()
 
-
-# --- APLICACIÓN PRINCIPAL ---
+# --- APLICACIÓN ---
 if 'df_hme' in st.session_state:
     st.title("📊 Sistema de Gestión y Control - HME Drive Thru")
     
-    # Barra lateral de información del usuario
     st.sidebar.header("👤 Sesión Activa")
     st.sidebar.markdown(f"**Usuario:** {st.session_state.usuario_actual}")
     st.sidebar.markdown(f"**Perfil:** `{st.session_state.rol}`")
     
-    # Opciones exclusivas del Administrador
     if st.session_state.rol == "Administrador":
         if st.sidebar.button("🔄 Sincronizar / Recargar Excel", use_container_width=True):
             df_h, df_25, df_26, df_cot = cargar_datos(EXCEL_FILE)
@@ -184,7 +163,7 @@ if 'df_hme' in st.session_state:
             st.session_state.df_at_2025 = df_25
             st.session_state.df_at_2026 = df_26
             st.session_state.df_cotizaciones = df_cot
-            st.success("¡Datos sincronizados correctamente desde el Excel!")
+            st.success("¡Datos sincronizados!")
             st.rerun()
 
     if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
@@ -195,280 +174,124 @@ if 'df_hme' in st.session_state:
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Panel de Navegación")
     
-    # Menú dinámico según el rol
     if st.session_state.rol == "Administrador":
         menu_opcion = st.sidebar.radio("Ir a la sección:", [
-            "🏢 Estado Drive HME", 
-            "🛠️ Atenciones 2025", 
-            "🛠️ Atenciones 2026", 
-            "💰 Cotizaciones",
-            "➕ Registrar Nuevo Caso (2026)",
-            "👤 Gestión de Usuarios (Admin)"
+            "🏢 Estado Drive HME", "🛠️ Atenciones 2025", "🛠️ Atenciones 2026", 
+            "💰 Cotizaciones", "➕ Registrar Nuevo Caso (2026)", "👤 Gestión de Usuarios (Admin)"
         ])
     else:
         menu_opcion = st.sidebar.radio("Ir a la sección:", [
-            "🏢 Estado Drive HME", 
-            "🛠️ Atenciones 2025", 
-            "🛠️ Atenciones 2026", 
-            "💰 Cotizaciones"
+            "🏢 Estado Drive HME", "🛠️ Atenciones 2025", "🛠️ Atenciones 2026", "💰 Cotizaciones"
         ])
-        st.sidebar.info("ℹ️ Perfil de lectura: Para solicitar modificaciones o registrar casos, comunícate con el administrador.")
 
     st.sidebar.markdown("---")
 
-    # 1. Estado Drive HME
     if menu_opcion == "🏢 Estado Drive HME":
         c1, c2 = st.columns(2)
         with c1:
-            marcas = ["Todas"] + list(st.session_state.df_hme["MARCA"].unique())
+            marcas = ["Todas"] + list(st.session_state.df_hme["MARCA"].dropna().unique())
             filtro_marca = st.selectbox("Filtrar por Marca:", marcas)
         with c2:
             busqueda_tienda = st.text_input("Buscar Tienda / Código / Ubicación:", "")
 
-        df_hme_filtered = st.session_state.df_hme.copy()
+        df_f = st.session_state.df_hme.copy()
         if filtro_marca != "Todas":
-            df_hme_filtered = df_hme_filtered[df_hme_filtered["MARCA"] == filtro_marca]
+            df_f = df_f[df_f["MARCA"] == filtro_marca]
         if busqueda_tienda:
-            df_hme_filtered = df_hme_filtered[
-                df_hme_filtered["TIENDA"].astype(str).str.contains(busqueda_tienda, case=False, na=False) |
-                df_hme_filtered["UBICACIÓN"].astype(str).str.contains(busqueda_tienda, case=False, na=False)
+            df_f = df_f[
+                df_f["TIENDA"].astype(str).str.contains(busqueda_tienda, case=False, na=False) |
+                df_f["UBICACIÓN"].astype(str).str.contains(busqueda_tienda, case=False, na=False)
             ]
 
         col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
         with col_title:
             st.subheader("🏢 Estado General de Equipos en Tiendas HME")
         with col_btn1:
-            st.download_button("📊 Excel", convertir_df_a_excel(df_hme_filtered), "Estado_Drive_HME_Filtrado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button("📊 Excel", convertir_df_a_excel(df_f), "Estado_HME.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with col_btn2:
-            st.download_button("📄 PDF", generar_pdf_resumen("Estado Drive HME", df_hme_filtered), "Estado_Drive_HME_Filtrado.pdf", "application/pdf", use_container_width=True)
+            st.download_button("📄 PDF", generar_pdf_resumen("Estado Drive HME", df_f), "Estado_HME.pdf", "application/pdf", use_container_width=True)
         
         st.markdown("---")
+        total_t = len(df_f)
+        total_op = df_f["HEADPHONE OPERATIVOS"].sum() if "HEADPHONE OPERATIVOS" in df_f.columns else 0
+        total_av = df_f["HEADPHONE AVERIADOS"].sum() if "HEADPHONE AVERIADOS" in df_f.columns else 0
         
-        total_tiendas = len(df_hme_filtered)
-        total_headphone_op = df_hme_filtered["HEADPHONE OPERATIVOS"].sum() if not df_hme_filtered.empty else 0
-        total_headphone_av = df_hme_filtered["HEADPHONE AVERIADOS"].sum() if not df_hme_filtered.empty else 0
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Tiendas Monitoreadas", total_tiendas)
-        col2.metric("Headphones Operativos", int(total_headphone_op))
-        col3.metric("Headphones Averiados", int(total_headphone_av))
-        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Tiendas Monitoreadas", total_t)
+        c2.metric("Headphones Operativos", int(total_op))
+        c3.metric("Headphones Averiados", int(total_av))
         st.markdown("---")
+        st.dataframe(df_f, use_container_width=True)
 
-        if not df_hme_filtered.empty:
-            st.markdown("### 📊 Comparativa de Headphones por Tienda")
-            df_chart = df_hme_filtered[["TIENDA", "HEADPHONE OPERATIVOS", "HEADPHONE AVERIADOS"]].melt(
-                id_vars=["TIENDA"], value_vars=["HEADPHONE OPERATIVOS", "HEADPHONE AVERIADOS"],
-                var_name="Estado", value_name="Cantidad"
-            )
-            chart_hme = alt.Chart(df_chart).mark_bar().encode(
-                x=alt.X('TIENDA:N', sort=None),
-                y='Cantidad:Q',
-                color=alt.Color('Estado:N', scale=alt.Scale(range=['#2ca02c', '#d62728'])),
-                tooltip=['TIENDA', 'Estado', 'Cantidad']
-            ).properties(height=300)
-            st.altair_chart(chart_hme, use_container_width=True)
-
-        st.dataframe(df_hme_filtered, use_container_width=True)
-
-    # 2. Atenciones 2025
     elif menu_opcion == "🛠️ Atenciones 2025":
-        df_25_filtered = st.session_state.df_at_2025.copy()
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            if "TIPOLOGIA" in df_25_filtered.columns:
-                tipologias_25 = ["Todas"] + list(df_25_filtered["TIPOLOGIA"].unique())
-                f_tipo_25 = st.selectbox("Filtrar por Tipología (2025):", tipologias_25)
-                if f_tipo_25 != "Todas":
-                    df_25_filtered = df_25_filtered[df_25_filtered["TIPOLOGIA"] == f_tipo_25]
-        with c2:
-            busqueda_25 = st.text_input("Buscar en Atenciones 2025:", "")
-            if busqueda_25:
-                df_25_filtered = df_25_filtered[df_25_filtered.astype(str).apply(lambda x: x.str.contains(busqueda_25, case=False)).any(axis=1)]
+        df_25 = st.session_state.df_at_2025.copy()
+        busq = st.text_input("Buscar en Atenciones 2025:", "")
+        if busq:
+            df_25 = df_25[df_25.astype(str).apply(lambda x: x.str.contains(busq, case=False)).any(axis=1)]
+        st.subheader("🛠️ Atenciones - 2025")
+        st.metric("Total", len(df_25))
+        st.dataframe(df_25, use_container_width=True)
 
-        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
-        with col_title:
-            st.subheader("🛠️ Registro de Atenciones - 2025")
-        with col_btn1:
-            st.download_button("📊 Excel", convertir_df_a_excel(df_25_filtered), "Atenciones_2025_Filtrado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        with col_btn2:
-            st.download_button("📄 PDF", generar_pdf_resumen("Atenciones 2025", df_25_filtered), "Atenciones_2025_Filtrado.pdf", "application/pdf", use_container_width=True)
-        
-        st.markdown("---")
-        st.metric("Total de Atenciones Filtradas (2025)", len(df_25_filtered))
-        st.markdown("---")
-        st.dataframe(df_25_filtered, use_container_width=True)
-
-    # 3. Atenciones 2026
     elif menu_opcion == "🛠️ Atenciones 2026":
-        df_26_filtered = st.session_state.df_at_2026.copy()
-        
+        df_26 = st.session_state.df_at_2026.copy()
+        busq = st.text_input("Buscar en Atenciones 2026:", "")
+        if busq:
+            df_26 = df_26[df_26.astype(str).apply(lambda x: x.str.contains(busq, case=False)).any(axis=1)]
+        st.subheader("🛠️ Atenciones - 2026")
+        tot_c = df_26["COSTO DE ATENCION"].sum() if "COSTO DE ATENCION" in df_26.columns else 0
         c1, c2 = st.columns(2)
-        with c1:
-            if "TIPOLOGIA" in df_26_filtered.columns:
-                tips_26 = ["Todas"] + list(df_26_filtered["TIPOLOGIA"].unique())
-                ft_26 = st.selectbox("Filtrar por Tipología (2026):", tips_26)
-                if ft_26 != "Todas":
-                    df_26_filtered = df_26_filtered[df_26_filtered["TIPOLOGIA"] == ft_26]
-        with c2:
-            busqueda_26 = st.text_input("Buscar en Atenciones 2026:", "")
-            if busqueda_26:
-                df_26_filtered = df_26_filtered[df_26_filtered.astype(str).apply(lambda x: x.str.contains(busqueda_26, case=False)).any(axis=1)]
+        c1.metric("Atenciones", len(df_26))
+        c2.metric("Costo Total", f"S/. {tot_c:,.2f}")
+        st.dataframe(df_26, use_container_width=True)
 
-        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
-        with col_title:
-            st.subheader("🛠️ Registro de Atenciones - 2026")
-        with col_btn1:
-            st.download_button("📊 Excel", convertir_df_a_excel(df_26_filtered), "Atenciones_2026_Filtrado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        with col_btn2:
-            st.download_button("📄 PDF", generar_pdf_resumen("Atenciones 2026", df_26_filtered), "Atenciones_2026_Filtrado.pdf", "application/pdf", use_container_width=True)
-        
-        st.markdown("---")
-        
-        total_atenciones_26 = len(df_26_filtered)
-        total_costo_26 = df_26_filtered["COSTO DE ATENCION"].sum() if "COSTO DE ATENCION" in df_26_filtered.columns else 0
-        
-        col1, col2 = st.columns(2)
-        col1.metric("Atenciones Filtradas (2026)", total_atenciones_26)
-        col2.metric("Costo Total Acumulado", f"S/. {total_costo_26:,.2f}")
-        
-        st.markdown("---")
-
-        if "MES" in df_26_filtered.columns and not df_26_filtered.empty:
-            st.markdown("### 📈 Tendencia de Atenciones por Mes y Costos por Tipología")
-            c_g1, c_g2 = st.columns(2)
-            with c_g1:
-                conteo_mes = df_26_filtered["MES"].value_counts().reset_index()
-                conteo_mes.columns = ["Mes", "Cantidad"]
-                chart_mes = alt.Chart(conteo_mes).mark_bar(color="#1f77b4", cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
-                    x=alt.X('Mes', sort=None), y='Cantidad', tooltip=['Mes', 'Cantidad']
-                ).properties(height=250, title="Atenciones por Mes")
-                st.altair_chart(chart_mes, use_container_width=True)
-            with c_g2:
-                costo_tipo = df_26_filtered.groupby("TIPOLOGIA")["COSTO DE ATENCION"].sum().reset_index()
-                chart_tipo = alt.Chart(costo_tipo).mark_arc(innerRadius=50).encode(
-                    theta='COSTO DE ATENCION:Q', color='TIPOLOGIA:N', tooltip=['TIPOLOGIA', 'COSTO DE ATENCION']
-                ).properties(height=250, title="Costo por Tipología (S/.)")
-                st.altair_chart(chart_tipo, use_container_width=True)
-
-        st.dataframe(df_26_filtered, use_container_width=True)
-
-    # 4. Cotizaciones
     elif menu_opcion == "💰 Cotizaciones":
-        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
-        with col_title:
-            st.subheader("💰 Cotizaciones HME")
-        with col_btn1:
-            st.download_button("📊 Excel", convertir_df_a_excel(st.session_state.df_cotizaciones), "Cotizaciones_HME.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        with col_btn2:
-            st.download_button("📄 PDF", generar_pdf_resumen("Cotizaciones HME", st.session_state.df_cotizaciones), "Cotizaciones_HME.pdf", "application/pdf", use_container_width=True)
-        
-        st.markdown("---")
-        st.markdown("Listado oficial de cotizaciones vigentes para componentes y sistemas completos.")
+        st.subheader("💰 Cotizaciones HME")
         st.dataframe(st.session_state.df_cotizaciones, use_container_width=True)
 
-    # 5. Registrar Nuevo Caso (Solo Administrador)
     elif menu_opcion == "➕ Registrar Nuevo Caso (2026)" and st.session_state.rol == "Administrador":
-        st.subheader("➕ Agregar Nueva Atención / Caso al Sistema (2026)")
-        st.markdown("Completa los campos para registrar un nuevo caso y actualizar automáticamente los reportes y costos.")
-        
-        with st.form("form_nuevo_caso"):
+        st.subheader("➕ Registrar Nuevo Caso (2026)")
+        with st.form("form_caso"):
             c1, c2, c3 = st.columns(3)
             with c1:
-                marca_input = st.text_input("Marca", "DELOSI")
-                tienda_input = st.text_input("Tienda", "KFC ")
-                ubicacion_input = st.text_input("Ubicación", "SAN ISIDRO")
+                marca = st.text_input("Marca", "DELOSI")
+                tienda = st.text_input("Tienda", "KFC")
+                ubicacion = st.text_input("Ubicación", "SAN ISIDRO")
             with c2:
-                mes_input = st.selectbox("MES", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
-                fecha_solicitud = st.date_input("FECHA DE SOLICITUD")
-                solicitante_input = st.text_input("SOLICITANTE", "EDGAR CUSIHUAMAN")
+                mes = st.selectbox("MES", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
+                fecha = st.date_input("FECHA")
+                solicitante = st.text_input("SOLICITANTE", "EDGAR")
             with c3:
-                tipologia_input = st.selectbox("TIPOLOGIA", ["T1", "T2", "T3", "T4"])
-                horario_input = st.selectbox("DIURNO/NOCTURNO", ["HORARIO DE OFICINA", "NOCTURNO"])
-                costo_input = st.number_input("COSTO DE ATENCION", min_value=0.0, value=50.0, step=5.0)
+                horario = st.selectbox("DIURNO/NOCTURNO", ["HORARIO DE OFICINA", "NOCTURNO"])
+                costo = st.number_input("COSTO DE ATENCION", min_value=0.0, value=50.0)
             
-            solicitud_input = st.text_area("SOLICITUD", "REVISIÓN TÉCNICA DE EQUIPOS HME")
-            detalle_input = st.text_area("DETALLE", "SE REALIZÓ SOPORTE TÉCNICO Y VALIDACIÓN DE SISTEMA.")
+            solicitud = st.text_input("SOLICITUD", "SOPORTE")
+            detalle = st.text_area("DETALLE", "SOPORTE TÉCNICO")
             
-            submit_button = st.form_submit_button(label="💾 Guardar Caso en la Base de Sesión")
-            
-            if submit_button:
-                nuevo_item = len(st.session_state.df_at_2026) + 1
-                fecha_formateada = pd.to_datetime(fecha_solicitud).strftime('%Y-%m-%d')
-                
-                nuevo_registro = {
-                    "ITEM": nuevo_item,
-                    "MARCA": marca_input,
-                    "TIENDA": tienda_input,
-                    "UBICACIÓN ": ubicacion_input,
-                    "MES": mes_input,
-                    "FECHA DE SOLICITUD": fecha_formateada,
-                    "SOLICITANTE": solicitante_input,
-                    "SOLICITUD": solicitud_input,
-                    "DETALLE": detalle_input,
-                    "TIPOLOGIA": tipologia_input,
-                    "DIURNO/NOCTURNO": horario_input,
-                    "COSTO DE ATENCION": costo_input
-                }
-                
-                nuevo_df = pd.DataFrame([nuevo_registro])
-                st.session_state.df_at_2026 = pd.concat([st.session_state.df_at_2026, nuevo_df], ignore_index=True)
-                st.success("¡Caso registrado correctamente!")
+            if st.form_submit_button("💾 Guardar"):
+                nuevo = pd.DataFrame([{
+                    "ITEM": len(st.session_state.df_at_2026) + 1,
+                    "MARCA": marca, "TIENDA": tienda, "UBICACIÓN\xa0": ubicacion,
+                    "MES": mes, "FECHA DE SOLICITUD": pd.to_datetime(fecha).strftime('%Y-%m-%d'),
+                    "SOLICITANTE": solicitante, "SOLICITUD": solicitud, "DETALLE": detalle,
+                    "DIURNO/NOCTURNO": horario, "COSTO DE ATENCION": costo
+                }])
+                st.session_state.df_at_2026 = pd.concat([st.session_state.df_at_2026, nuevo], ignore_index=True)
+                st.success("¡Registrado!")
 
-    # 6. GESTIÓN DE USUARIOS (NUEVA PESTAÑA ADMINISTRADOR)
     elif menu_opcion == "👤 Gestión de Usuarios (Admin)" and st.session_state.rol == "Administrador":
-        st.subheader("👤 Administración y Registro de Usuarios")
-        st.markdown("Crea nuevos accesos para tus compañeros o actualiza contraseñas de manera sencilla.")
-        st.markdown("---")
-
-        col_crear, col_lista = st.columns([1, 1])
-
-        with col_crear:
-            st.markdown("### ➕ Crear / Actualizar Usuario")
-            with st.form("form_crear_usuario"):
-                nuevo_usr = st.text_input("Nombre de Usuario (Login)").strip().lower()
-                nueva_clave = st.text_input("Contraseña", type="password").strip()
-                nombre_completo = st.text_input("Nombre / Referencia (Ej: Juan Perez)").strip()
-                rol_seleccionado = st.selectbox("Perfil / Rol", ["Visualizador", "Administrador"])
-                
-                btn_crear_usr = st.form_submit_button("💾 Guardar Usuario", use_container_width=True)
-
-                if btn_crear_usr:
-                    if not nuevo_usr or not nueva_clave or not nombre_completo:
-                        st.error("Por favor completa todos los campos del formulario.")
-                    else:
-                        usuarios_db[nuevo_usr] = {
-                            "clave": nueva_clave,
-                            "rol": rol_seleccionado,
-                            "nombre": nombre_completo
-                        }
+        st.subheader("👤 Gestión de Usuarios")
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.form("form_usr"):
+                usr_n = st.text_input("Usuario").strip().lower()
+                pwd_n = st.text_input("Contraseña", type="password").strip()
+                nom_n = st.text_input("Nombre").strip()
+                rol_n = st.selectbox("Rol", ["Visualizador", "Administrador"])
+                if st.form_submit_button("💾 Guardar"):
+                    if usr_n and pwd_n:
+                        usuarios_db[usr_n] = {"clave": pwd_n, "rol": rol_n, "nombre": nom_n}
                         guardar_usuarios(usuarios_db)
-                        st.success(f"¡Usuario '{nuevo_usr}' guardado con éxito con perfil '{rol_seleccionado}'!")
+                        st.success("¡Guardado!")
                         st.rerun()
-
-        with col_lista:
-            st.markdown("### 📋 Usuarios Registrados")
-            lista_usrs = []
-            for u, data in usuarios_db.items():
-                lista_usrs.append({
-                    "Usuario": u,
-                    "Nombre": data.get("nombre", "-"),
-                    "Rol": data.get("rol", "-"),
-                    "Contraseña": "••••••••"
-                })
-            df_usuarios_ver = pd.DataFrame(lista_usrs)
-            st.dataframe(df_usuarios_ver, use_container_width=True)
-
-            st.markdown("---")
-            st.markdown("### 🗑️ Eliminar Usuario")
-            usuarios_borrables = [u for u in usuarios_db.keys() if u != "admin"]
-            if usuarios_borrables:
-                usr_a_borrar = st.selectbox("Seleccionar usuario a eliminar:", usuarios_borrables)
-                if st.button("❌ Eliminar Acceso", use_container_width=True):
-                    del usuarios_db[usr_a_borrar]
-                    guardar_usuarios(usuarios_db)
-                    st.success(f"¡Usuario '{usr_a_borrar}' eliminado correctamente!")
-                    st.rerun()
-            else:
-                st.info("No hay usuarios secundarios creados para eliminar.")
+        with c2:
+            st.dataframe(pd.DataFrame([{"Usuario": k, **v} for k, v in usuarios_db.items()]), use_container_width=True)
