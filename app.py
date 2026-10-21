@@ -62,7 +62,7 @@ def cargar_datos(file_path):
     df_at_2026 = pd.read_excel(xls, 'Atenciones 2026')
     df_cotizaciones = pd.read_excel(xls, 'Cotizaciones')
     
-    # Limpiar nombres de columnas y espacios en blanco de celdas de texto
+    # Limpiar espacios extra en nombres de columnas y celdas de texto
     for df in [df_hme, df_at_2025, df_at_2026, df_cotizaciones]:
         df.columns = [str(c).strip() for c in df.columns]
         for col in df.select_dtypes(include=['object']).columns:
@@ -271,4 +271,77 @@ if 'df_hme' in st.session_state:
         total_25 = len(df_25)
         metricas_pdf = {"Total Atenciones (2025)": total_25}
 
-        col_title, col_btn1, col_btn
+        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
+        with col_title:
+            st.subheader("🛠️ Registro de Atenciones - 2025")
+        with col_btn1:
+            st.download_button("📊 Excel", convertir_df_a_excel(df_25), "Atenciones_2025.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with col_btn2:
+            st.download_button("📄 PDF", generar_pdf_resumen("Atenciones 2025", df_25, metricas_pdf), "Atenciones_2025.pdf", "application/pdf", use_container_width=True)
+        
+        st.markdown("---")
+        st.metric("Total de Atenciones Filtradas (2025)", total_25)
+        st.markdown("---")
+        st.dataframe(df_25, use_container_width=True)
+
+    elif menu_opcion == "🛠️ Atenciones 2026":
+        df_26 = st.session_state.df_at_2026.copy()
+        
+        f_col1, f_col2, f_col3 = st.columns(3)
+        with f_col1:
+            meses_26 = ["Todos"] + list(df_26["MES"].dropna().unique()) if "MES" in df_26.columns else ["Todos"]
+            filtro_mes_26 = st.selectbox("Filtrar por Mes (2026):", meses_26, key="m26")
+        with f_col2:
+            tiendas_26 = ["Todas"] + list(df_26["TIENDA"].dropna().unique()) if "TIENDA" in df_26.columns else ["Todas"]
+            filtro_tienda_26 = st.selectbox("Filtrar por Tienda (2026):", tiendas_26, key="t26")
+        with f_col3:
+            busq_26 = st.text_input("Búsqueda libre (2026):", "", key="b26")
+
+        if filtro_mes_26 != "Todos" and "MES" in df_26.columns:
+            df_26 = df_26[df_26["MES"] == filtro_mes_26]
+        if filtro_tienda_26 != "Todas" and "TIENDA" in df_26.columns:
+            df_26 = df_26[df_26["TIENDA"] == filtro_tienda_26]
+        if busq_26:
+            df_26 = df_26[df_26.astype(str).apply(lambda x: x.str.contains(busq_26, case=False)).any(axis=1)]
+
+        total_26 = len(df_26)
+        tot_c = pd.to_numeric(df_26["COSTO DE ATENCION"], errors='coerce').sum() if "COSTO DE ATENCION" in df_26.columns else 0
+        
+        metricas_pdf = {
+            "Atenciones Filtradas (2026)": total_26,
+            "Costo Total Acumulado": f"US$ {tot_c:,.2f}"
+        }
+
+        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
+        with col_title:
+            st.subheader("🛠️ Registro de Atenciones - 2026")
+        with col_btn1:
+            st.download_button("📊 Excel", convertir_df_a_excel(df_26), "Atenciones_2026.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with col_btn2:
+            st.download_button("📄 PDF", generar_pdf_resumen("Atenciones 2026", df_26, metricas_pdf), "Atenciones_2026.pdf", "application/pdf", use_container_width=True)
+        
+        st.markdown("---")
+        c1, c2 = st.columns(2)
+        c1.metric("Atenciones Filtradas (2026)", total_26)
+        c2.metric("Costo Total Acumulado", f"US$ {tot_c:,.2f}")
+        st.markdown("---")
+        st.dataframe(df_26, use_container_width=True)
+
+    elif menu_opcion == "💰 Cotizaciones":
+        col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
+        with col_title:
+            st.subheader("💰 Cotizaciones HME")
+        with col_btn1:
+            st.download_button("📊 Excel", convertir_df_a_excel(st.session_state.df_cotizaciones), "Cotizaciones.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with col_btn2:
+            st.download_button("📄 PDF", generar_pdf_resumen("Cotizaciones HME", st.session_state.df_cotizaciones), "Cotizaciones.pdf", "application/pdf", use_container_width=True)
+        
+        st.markdown("---")
+        st.dataframe(st.session_state.df_cotizaciones, use_container_width=True)
+
+    elif menu_opcion == "➕ Registrar Nuevo Caso (2026)" and st.session_state.rol == "Administrador":
+        st.subheader("➕ Registrar Nuevo Caso (2026)")
+        with st.form("form_caso"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                marca = st.
