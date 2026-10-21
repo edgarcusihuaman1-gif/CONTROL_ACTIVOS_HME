@@ -130,7 +130,6 @@ def generar_pdf_resumen(titulo, df, metricas_extra=None):
     
     elements.append(Paragraph(f"<b>Reporte: {titulo}</b>", title_style))
     
-    # Agregar métricas clave en la parte superior si existen
     if metricas_extra:
         texto_metricas = " | ".join([f"<b>{k}:</b> {v}" for k, v in metricas_extra.items()])
         elements.append(Paragraph(texto_metricas, sub_style))
@@ -297,7 +296,7 @@ if 'df_hme' in st.session_state:
 
         if filtro_mes_26 != "Todos" and "MES" in df_26.columns:
             df_26 = df_26[df_26["MES"] == filtro_mes_26]
-        if filtro_tienda_26 != "Todas" and "TIENDA" in df_26.columns:
+        if filtro_tienda_26 != "Todos" and "TIENDA" in df_26.columns:
             df_26 = df_26[df_26["TIENDA"] == filtro_tienda_26]
         if busq_26:
             df_26 = df_26[df_26.astype(str).apply(lambda x: x.str.contains(busq_26, case=False)).any(axis=1)]
@@ -307,7 +306,7 @@ if 'df_hme' in st.session_state:
         
         metricas_pdf = {
             "Atenciones Filtradas (2026)": total_26,
-            "Costo Total Acumulado": f"S/. {tot_c:,.2f}"
+            "Costo Total Acumulado": f"US$ {tot_c:,.2f}"
         }
 
         col_title, col_btn1, col_btn2 = st.columns([3, 1.2, 1.2])
@@ -321,7 +320,7 @@ if 'df_hme' in st.session_state:
         st.markdown("---")
         c1, c2 = st.columns(2)
         c1.metric("Atenciones Filtradas (2026)", total_26)
-        c2.metric("Costo Total Acumulado", f"S/. {tot_c:,.2f}")
+        c2.metric("Costo Total Acumulado", f"US$ {tot_c:,.2f}")
         st.markdown("---")
         st.dataframe(df_26, use_container_width=True)
 
@@ -351,7 +350,7 @@ if 'df_hme' in st.session_state:
                 solicitante = st.text_input("SOLICITANTE", "EDGAR CUSIHUAMAN")
             with c3:
                 horario = st.selectbox("DIURNO/NOCTURNO", ["HORARIO DE OFICINA", "NOCTURNO"])
-                costo = st.number_input("COSTO DE ATENCION", min_value=0.0, value=50.0)
+                costo = st.number_input("COSTO DE ATENCION (US$)", min_value=0.0, value=50.0)
             
             solicitud = st.text_input("SOLICITUD", "SOPORTE")
             detalle = st.text_area("DETALLE", "SOPORTE TÉCNICO")
