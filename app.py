@@ -62,7 +62,6 @@ def cargar_datos(file_path):
     df_at_2026 = pd.read_excel(xls, 'Atenciones 2026')
     df_cotizaciones = pd.read_excel(xls, 'Cotizaciones')
     
-    # Limpiar espacios extra en nombres de columnas y celdas de texto
     for df in [df_hme, df_at_2025, df_at_2026, df_cotizaciones]:
         df.columns = [str(c).strip() for c in df.columns]
         for col in df.select_dtypes(include=['object']).columns:
@@ -344,4 +343,45 @@ if 'df_hme' in st.session_state:
         with st.form("form_caso"):
             c1, c2, c3 = st.columns(3)
             with c1:
-                marca = st.
+                marca = st.text_input("Marca", "DELOSI")
+                tienda = st.text_input("Tienda", "KFC")
+                ubicacion = st.text_input("Ubicación", "SAN ISIDRO")
+            with c2:
+                mes = st.selectbox("MES", ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"])
+                fecha = st.date_input("FECHA")
+                solicitante = st.text_input("SOLICITANTE", "EDGAR CUSIHUAMAN")
+            with c3:
+                horario = st.selectbox("DIURNO/NOCTURNO", ["HORARIO DE OFICINA", "NOCTURNO"])
+                costo = st.number_input("COSTO DE ATENCION (US$)", min_value=0.0, value=50.0)
+            
+            solicitud = st.text_input("SOLICITUD", "SOPORTE")
+            detalle = st.text_area("DETALLE", "SOPORTE TÉCNICO")
+            
+            if st.form_submit_button("💾 Guardar"):
+                nuevo = pd.DataFrame([{
+                    "ITEM": len(st.session_state.df_at_2026) + 1,
+                    "MARCA": marca, "TIENDA": tienda, "UBICACIÓN": ubicacion,
+                    "MES": mes, "FECHA DE SOLICITUD": pd.to_datetime(fecha).strftime('%Y-%m-%d'),
+                    "SOLICITANTE": solicitante, "SOLICITUD": solicitud, "DETALLE": detalle,
+                    "DIURNO/NOCTURNO": horario, "COSTO DE ATENCION": costo
+                }])
+                st.session_state.df_at_2026 = pd.concat([st.session_state.df_at_2026, nuevo], ignore_index=True)
+                st.success("¡Registrado correctamente!")
+
+    elif menu_opcion == "👤 Gestión de Usuarios (Admin)" and st.session_state.rol == "Administrador":
+        st.subheader("👤 Gestión de Usuarios")
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.form("form_usr"):
+                usr_n = st.text_input("Usuario").strip().lower()
+                pwd_n = st.text_input("Contraseña", type="password").strip()
+                nom_n = st.text_input("Nombre").strip()
+                rol_n = st.selectbox("Rol", ["Visualizador", "Administrador"])
+                if st.form_submit_button("💾 Guardar"):
+                    if usr_n and pwd_n:
+                        usuarios_db[usr_n] = {"clave": pwd_n, "rol": rol_n, "nombre": nom_n}
+                        guardar_usuarios(usuarios_db)
+                        st.success("¡Guardado!")
+                        st.rerun()
+        with c2:
+            st.dataframe(pd.DataFrame([{"Usuario": k, **v} for k, v in usuarios_db.items()]), use_container_width=True)
